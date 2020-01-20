@@ -106,25 +106,6 @@ class MPromise {
             executeResolver.call(this, resolver);
         }
     }
-    then(onResolved, onRejected) {
-
-        if (typeof onResolved !== 'function' && this.state === RESOLVED ||
-            typeof onRejected !== 'function' && this.state === REJECTED) {
-            return this;
-        }
-
-        let promise = new MPromise();
-
-        if (this.state !== PENDING) {//下一个轮询执行回调
-            var callback = this.state === RESOLVED ? onResolved : onRejected;
-            //注意：传入promise，
-            //执行then中的回调，并传入值，并传递新的promise起到衔接作用
-            executeCallbackAsync.call(promise, callback, this.data);
-        } else { //放入队列中，等待状态的改变
-            this.callbackQueue.push(new CallbackItem(promise, onResolved, onRejected))
-        }
-        return promise;
-    }
     static resolve(value) {
         if (value instanceof this) {
             return value;
@@ -221,6 +202,63 @@ class MPromise {
             return prev.then(next).then((v)=> v);
         }, this.resolve());
     }
+    static retry(process, onFail, options){
+        let limit = Infinity; //重试的次数限制
+        let interval = 0; //间隔
+        let maxInterval = Infinity; //最大间隔
+        let intervalMultiplier = 1; //间隔乘数
+
+        if(typeof onFail != 'function'){
+            onFail = null;
+        } else if(options == 'number'){
+            limit = options;
+        } else if (options && typeof options == 'object'){
+            limit = typeof options.limit == 'number' ? options.limit : limit;
+            interval = typeof options.interval == 'number' ? options.interval : interval;
+            maxInterval = typeof options.maxInterval == 'number' ? options.maxInterval : maxInterval;
+            intervalMultiplier = typeof options.intervalMultiplier == 'number' ? options.intervalMultiplier : intervalMultiplier;
+        }
+
+        return process().catch(function (reason){
+            return retry(reason, limit - 1, Math.min(interval * intervalMultiplier));
+        });
+
+
+        function retry(reason, limit, interval) {
+            if (onFail) {
+                onFail(reason, limit);
+            }
+
+            if (limit <= 0) {
+                throw reason;
+            }
+
+            return MPromise.resolve().wait(Math.floor(interval)).then(function () {
+                return process();
+            }).catch(function(reason){
+                return retry(reason, limit - 1, Math.min(interval * intervalMultiplier));
+            });
+        }
+    }
+    then(onResolved, onRejected) {
+
+        if (typeof onResolved !== 'function' && this.state === RESOLVED ||
+            typeof onRejected !== 'function' && this.state === REJECTED) {
+            return this;
+        }
+
+        let promise = new MPromise();
+
+        if (this.state !== PENDING) {//下一个轮询执行回调
+            var callback = this.state === RESOLVED ? onResolved : onRejected;
+            //注意：传入promise，
+            //执行then中的回调，并传入值，并传递新的promise起到衔接作用
+            executeCallbackAsync.call(promise, callback, this.data);
+        } else { //放入队列中，等待状态的改变
+            this.callbackQueue.push(new CallbackItem(promise, onResolved, onRejected))
+        }
+        return promise;
+    }
     catch(onRejected) {
         return this.then(null, onRejected);
     }
@@ -251,5 +289,8 @@ class MPromise {
                 throw error;
             }, 0);
         });
+    }
+    isPending(){
+        return this.state == PENDING ? true : false;
     }
 }
